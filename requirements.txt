@@ -1,0 +1,17 @@
+transformers==4.40.0
+datasets
+evaluate
+albumentations
+jiwer
+Pillow
+accelerate
+sentencepiece
+torch>=2.0.0
+PyMuPDF
+pydub
+langdetect
+ffmpeg-python
+mutagen
+pyloudnorm
+tqdm
+numpy
