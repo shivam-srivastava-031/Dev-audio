@@ -1,0 +1,146 @@
+# ============================================================
+# Book-to-Audio Pipeline — Configuration
+# ============================================================
+
+# --- Stage 1: Layout Detection ---
+layout:
+  # Options: "nougat" | "doclayout" | "layoutlmv3" | "skip"
+  engine: "doclayout"
+  # Path to locally downloaded DocLayout-YOLO weights (auto-downloaded if missing)
+  doclayout_weights: "models/doclayout_yolo.pt"
+  nougat_model: "facebook/nougat-base"
+  layoutlmv3_model: "microsoft/layoutlmv3-base"
+  # Region types to keep and pass to OCR (skip headers/footers/figures)
+  keep_region_types:
+    - "body"
+    - "title"
+    - "chapter_title"
+    - "caption"
+
+# --- Stage 2: OCR ---
+ocr:
+  # HuggingFace repo of your fine-tuned TrOCR model (or local path)
+  model: "microsoft/trocr-large-printed"   # replace with your HF Hub ID after fine-tuning
+  processor: "microsoft/trocr-large-printed"
+  # Resolution for PDF -> image conversion (DPI)
+  dpi: 300
+  # Max pixels per image tile (for memory control)
+  max_pixels: 4096
+  # Batch size for OCR inference
+  batch_size: 4
+
+# --- Stage 3: LLM Post-Processing ---
+llm:
+  # Options: "ollama" | "transformers" | "skip"
+  backend: "ollama"
+  # Ollama model name (must be pulled: `ollama pull llama3.1`)
+  ollama_model: "llama3.1"
+  # If using transformers directly
+  hf_model: "meta-llama/Llama-3.1-8B-Instruct"
+  # Max tokens per correction chunk (paragraph-level)
+  max_chunk_tokens: 512
+  # Hallucination guard: flag if LLM changes > X% of characters
+  max_change_ratio: 0.15
+  # Processing passes (1 = fast, 2 = thorough)
+  passes: 2
+
+# --- Stage 4: Language Detection + Translation ---
+translation:
+  # Enable or disable translation
+  enabled: false
+  # Target language for TTS (ISO 639-1 code)
+  target_lang: "en"
+  # NLLB model size: "facebook/nllb-200-distilled-600M" | "facebook/nllb-200-1.3B"
+  nllb_model: "facebook/nllb-200-distilled-600M"
+  # Languages to skip translation even if detected (e.g. already English)
+  skip_langs:
+    - "en"
+
+# --- Stage 5: Semantic Structuring ---
+structure:
+  # Options: "rules" | "llm" | "hybrid"
+  strategy: "hybrid"
+  # Regex patterns to identify chapter headings
+  chapter_patterns:
+    - "^Chapter\\s+\\d+"
+    - "^CHAPTER\\s+\\d+"
+    - "^Part\\s+\\d+"
+    - "^Prologue$"
+    - "^Epilogue$"
+
+# --- Stage 6: Emotion Tagging + Speaker Segmentation ---
+emotion:
+  # HuggingFace model for sentence emotion classification
+  model: "j-hartmann/emotion-english-distilroberta-base"
+  # Apply emotion tagging at sentence level
+  level: "sentence"
+  # Minimum confidence to apply a non-neutral emotion tag
+  min_confidence: 0.6
+  # Enable dialogue speaker detection
+  speaker_detection: true
+  # Narrator voice ID (referenced in Stage 7)
+  narrator_voice: "narrator_default"
+
+# --- Stage 7: TTS ---
+tts:
+  # Options: "fish_speech" | "xtts" | "elevenlabs"
+  engine: "xtts"
+  # Coqui XTTS-v2 model path (auto-downloaded if using TTS library)
+  xtts_model: "tts_models/multilingual/multi-dataset/xtts_v2"
+  # Fish Speech server URL (if engine = fish_speech)
+  fish_speech_url: "http://localhost:8080"
+  # ElevenLabs API key (if engine = elevenlabs)
+  elevenlabs_api_key: ""
+  # Language for TTS
+  language: "en"
+  # Maximum words per TTS chunk
+  max_chunk_words: 300
+  # Output audio format for chunks
+  chunk_format: "wav"
+  # Voice profiles — add entries for each character
+  voice_profiles:
+    narrator_default:
+      speaker_wav: "voices/narrator.wav"    # reference audio clip for voice cloning
+      speed: 1.0
+      pitch_shift: 0.0
+    character_male_1:
+      speaker_wav: "voices/male_1.wav"
+      speed: 1.05
+      pitch_shift: -1.0
+    character_female_1:
+      speaker_wav: "voices/female_1.wav"
+      speed: 0.98
+      pitch_shift: 2.0
+  # Emotion → speaking adjustments
+  emotion_adjustments:
+    joy:     { speed: 1.1,  pitch_shift: 1.5 }
+    anger:   { speed: 1.2,  pitch_shift: -1.0 }
+    sadness: { speed: 0.9,  pitch_shift: -1.5 }
+    fear:    { speed: 1.15, pitch_shift: 0.5 }
+    neutral: { speed: 1.0,  pitch_shift: 0.0 }
+
+# --- Stage 8: Audio Stitching ---
+audio:
+  # Target loudness in LUFS (EBU R128 standard for audiobooks: -16)
+  target_lufs: -16.0
+  # True peak ceiling (dBTP)
+  true_peak: -1.5
+  # Pause durations (milliseconds) between structural elements
+  pause_between_sentences_ms: 200
+  pause_between_paragraphs_ms: 600
+  pause_between_chapters_ms: 2000
+  # MP3 bitrate
+  mp3_bitrate: "128k"
+  # Output cover art (optional, path to jpg/png)
+  cover_art: ""
+
+# --- General ---
+general:
+  # Device for model inference: "cpu" | "cuda" | "mps"
+  device: "cpu"
+  # Number of CPU workers for data loading
+  num_workers: 2
+  # Logging level: DEBUG | INFO | WARNING | ERROR
+  log_level: "INFO"
+  # Temporary working directory for intermediate files
+  temp_dir: ".pipeline_temp"
