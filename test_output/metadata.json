@@ -1,0 +1,11 @@
+{
+  "book_title": "Dummy",
+  "book_author": "Unknown Author",
+  "chapters": [
+    {
+      "number": 1,
+      "title": "Opening",
+      "duration_seconds": 1.16
+    }
+  ]
+}
