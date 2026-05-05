@@ -1,0 +1,17 @@
+# ── Core ML / TTS ──
+torch>=2.1.0
+kokoro>=0.9.4
+huggingface_hub==0.24.7
+
+# ── Text extraction ──
+pdfplumber>=0.10.0
+easyocr>=1.7.1
+Pillow>=10.0.0
+
+# ── Audio processing ──
+pydub>=0.25.1
+soundfile>=0.12.1
+scipy>=1.11.0
+
+# ── Utilities ──
+numpy>=1.24.0
