@@ -160,6 +160,7 @@ function resetUI() {
 }
 
 function showError(msg) {
+  console.error('[Kokoro Error]', msg);
   showPhase('error');
   errorMsg.textContent = msg;
   convertBtn.classList.remove('loading');
@@ -210,12 +211,21 @@ async function runConversion(file) {
   showPhase('progress');
 
   setStep(stepUpload, 'active');
-  setProgress(3, 'Uploading file…');
+  setProgress(3, 'Waking up space…');
 
   try {
+    /* ── 0. Wake up check ── */
+    // A quick fetch to ensure the space is alive
+    await fetch(`${BASE}/config`).catch(() => {
+        // If it fails, wait a bit and retry once
+        return new Promise(r => setTimeout(r, 2000)).then(() => fetch(`${BASE}/config`));
+    }).catch(() => {
+        throw new Error('Hugging Face Space is currently sleeping or unavailable. Please try again in 30 seconds.');
+    });
+
     /* ── 1. UPLOAD with timing ── */
     uploadStartTime = performance.now();
-    const serverPath = await uploadFile(file);
+    const uploadData = await uploadFile(file);
     const uploadMs   = performance.now() - uploadStartTime;
     const uploadSec  = (uploadMs / 1000).toFixed(1);
 
@@ -226,7 +236,7 @@ async function runConversion(file) {
 
     /* ── 2. QUEUE ── */
     const sessionHash = uuid();
-    await queueJob(serverPath, file.name, sessionHash);
+    await queueJob(uploadData, sessionHash);
     setProgress(38, 'Job queued — waiting for model…');
 
     /* ── 3. STREAM ── */
@@ -255,35 +265,41 @@ function uploadFile(file) {
 
     xhr.addEventListener('load', () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        return reject(new Error(`Upload failed (${xhr.status})`));
+        return reject(new Error(`Upload failed (${xhr.status}). The space might be waking up.`));
       }
       try {
         const data = JSON.parse(xhr.responseText);
         if (!Array.isArray(data) || !data[0]) throw new Error('Bad upload response');
-        resolve(typeof data[0] === 'string' ? data[0] : data[0].path);
+        // Return the full file object if available
+        resolve(data[0]);
       } catch (e) { reject(e); }
     });
 
-    xhr.addEventListener('error', () => reject(new Error('Network error during upload.')));
+    xhr.addEventListener('error', () => reject(new Error('Network error during upload. Check your internet or the HF Space status.')));
     xhr.open('POST', `${BASE}/gradio_api/upload`);
     xhr.send(fd);
   });
 }
 
 /* ── Queue job ── */
-async function queueJob(serverPath, origName, sessionHash) {
+async function queueJob(uploadData, sessionHash) {
+  // Construct the correct file data object for Gradio
+  const fileData = typeof uploadData === 'string' 
+    ? { path: uploadData, meta: { _type: 'gradio.FileData' } }
+    : uploadData;
+
   const res = await fetch(`${BASE}/gradio_api/queue/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      data: [{ path: serverPath, orig_name: origName, meta: { _type: 'gradio.FileData' } }],
+      data: [fileData],
       fn_index: 0,
       session_hash: sessionHash,
       trigger_id: null,
       event_data: null,
     }),
   });
-  if (!res.ok) throw new Error(`Queue join failed (${res.status})`);
+  if (!res.ok) throw new Error(`Queue join failed (${res.status}). The server might be overloaded.`);
   return (await res.json()).event_id;
 }
 
@@ -296,7 +312,7 @@ function streamResults(sessionHash) {
 
     const timeout = setTimeout(() => {
       sse.close(); currentSSE = null;
-      reject(new Error('Timed out after 10 minutes. Try a smaller file.'));
+      reject(new Error('Timed out after 10 minutes. The model is taking too long to respond.'));
     }, 10 * 60 * 1000);
 
     sse.onmessage = e => {
@@ -310,6 +326,7 @@ function streamResults(sessionHash) {
       }
       if (type === 'process_starts') {
         setStep(stepExtract, 'done');
+        setConn(conn1, true); // Ensure previous line is active
         setConn(conn2, true);
         setStep(stepSynth, 'active');
         setProgress(52, 'Synthesizing speech…');
@@ -317,9 +334,14 @@ function streamResults(sessionHash) {
         return;
       }
       if (type === 'heartbeat' || type === 'process_generating') {
-        if (!synthStarted) { setStep(stepSynth,'active'); synthStarted = true; }
+        if (!synthStarted) { 
+          setStep(stepExtract, 'done');
+          setStep(stepSynth,'active'); 
+          setConn(conn2, true);
+          synthStarted = true; 
+        }
         const cur = parseFloat(progressFill.style.width || '52');
-        if (cur < 88) setProgress(Math.min(cur + 3, 88), 'Synthesizing speech…');
+        if (cur < 88) setProgress(Math.min(cur + 2, 88), 'Synthesizing speech…');
         return;
       }
       if (type === 'process_completed') {
@@ -327,7 +349,7 @@ function streamResults(sessionHash) {
         const out = msg.output;
         if (out?.error) return reject(new Error(out.error));
         const data = out?.data;
-        if (!Array.isArray(data) || data.length < 3) return reject(new Error('Unexpected response from model.'));
+        if (!Array.isArray(data) || data.length < 3) return reject(new Error('Unexpected response structure from model.'));
         setStep(stepSynth,'done'); setConn(conn3,true); setStep(stepDone,'done');
         setProgress(100, 'Done!');
         setTimeout(() => handleCompletion(data[0], data[1], data[2]), 600);
@@ -336,13 +358,13 @@ function streamResults(sessionHash) {
       }
       if (type === 'process_error' || type === 'error') {
         clearTimeout(timeout); sse.close(); currentSSE = null;
-        reject(new Error(msg.output?.error || 'Server processing error.'));
+        reject(new Error(msg.output?.error || 'Server processing error. This can happen with very long texts.'));
       }
     };
 
     sse.onerror = () => {
       clearTimeout(timeout); sse.close(); currentSSE = null;
-      reject(new Error('Connection lost. The space may be waking up — please try again.'));
+      reject(new Error('Connection lost. The space may be waking up or resetting. Please try again.'));
     };
   });
 }
