@@ -1,210 +1,236 @@
 /**
- * Kokoro TTS — Frontend Logic
- *
- * API flow (Gradio SSE v3):
- *  1. POST /gradio_api/upload  → returns [{path, url, orig_name}]
- *  2. POST /gradio_api/queue/join  → {"event_id": "..."}
- *  3. GET  /gradio_api/queue/data?session_hash=<uuid>  (SSE stream)
- *     Events:
- *       process_starts   → queued
- *       process_generating / heartbeat → in-progress
- *       process_completed → {output: {data: [audioFileData, txtFileData, statusStr]}}
- *       process_error    → error
+ * Kokoro TTS — app.js
+ * Gradio SSE v3 API client + upload timing UI
  */
 
 const BASE = 'https://audio8899-kokorov2.hf.space';
 
-/* ── DOM refs ──────────────────────────────────────────────── */
+/* ── DOM refs ── */
 const dropZone      = document.getElementById('drop-zone');
 const fileInput     = document.getElementById('file-input');
-const dzDefault     = document.getElementById('dz-default');
+const dzIdle        = document.getElementById('dz-idle');
+const dzDragover    = document.getElementById('dz-dragover');
 const dzFile        = document.getElementById('dz-file');
+const dzFileEmoji   = document.getElementById('dz-file-emoji');
 const dzFileName    = document.getElementById('dz-file-name');
 const dzFileSize    = document.getElementById('dz-file-size');
-const dzFileIcon    = document.getElementById('dz-file-icon');
+const dzFileType    = document.getElementById('dz-file-type');
 const dzRemove      = document.getElementById('dz-remove');
 const convertBtn    = document.getElementById('convert-btn');
 
-const progressSec   = document.getElementById('progress-section');
-const progressBar   = document.getElementById('progress-bar');
-const progressBarW  = document.getElementById('progress-bar-wrap');
-const progressStatus= document.getElementById('progress-status');
+const phaseUpload   = document.getElementById('phase-upload');
+const phaseProgress = document.getElementById('phase-progress');
+const phaseResults  = document.getElementById('phase-results');
+const phaseError    = document.getElementById('phase-error');
 
-const resultsSec    = document.getElementById('results-section');
+const procLabel     = document.getElementById('proc-label');
+const progressFill  = document.getElementById('progress-fill');
+const progressGlow  = document.getElementById('progress-glow');
+const progressPct   = document.getElementById('progress-pct');
+
+const stepUpload    = document.getElementById('step-upload');
+const stepExtract   = document.getElementById('step-extract');
+const stepSynth     = document.getElementById('step-synth');
+const stepDone      = document.getElementById('step-done');
+const conn1         = document.getElementById('conn-1');
+const conn2         = document.getElementById('conn-2');
+const conn3         = document.getElementById('conn-3');
+
 const audioPlayer   = document.getElementById('audio-player');
 const downloadAudio = document.getElementById('download-audio');
 const downloadTxt   = document.getElementById('download-txt');
 const resetBtn      = document.getElementById('reset-btn');
-const resultsStatusText = document.getElementById('results-status-text');
-
-const errorSec      = document.getElementById('error-section');
-const errorMsg      = document.getElementById('error-msg');
 const errorResetBtn = document.getElementById('error-reset-btn');
+const errorMsg      = document.getElementById('error-msg');
+const resultStatusText = document.getElementById('result-status-text');
 
-/* ── State ─────────────────────────────────────────────────── */
+/* Custom player */
+const apcPlay     = document.getElementById('apc-play');
+const playIcon    = document.getElementById('play-icon');
+const pauseIcon   = document.getElementById('pause-icon');
+const apcSeek     = document.getElementById('apc-seek');
+const apcCurrent  = document.getElementById('apc-current');
+const apcDuration = document.getElementById('apc-duration');
+const apcVol      = document.getElementById('apc-vol');
+const vizIdle     = document.getElementById('viz-idle');
+
+/* ── State ── */
 let selectedFile = null;
 let currentSSE   = null;
+let audioCtx     = null;
+let analyser     = null;
+let vizRaf       = null;
+let uploadStartTime = null;
 
-/* ── File icon map ─────────────────────────────────────────── */
-const FILE_ICONS = {
-  'txt':  '📄',
-  'pdf':  '📑',
-  'png':  '🖼️',
-  'jpg':  '🖼️',
-  'jpeg': '🖼️',
-};
+/* ── Helpers ── */
+const FILE_ICONS = { txt:'📄', pdf:'📑', png:'🖼️', jpg:'🖼️', jpeg:'🖼️' };
+const FILE_LABELS = { txt:'TXT', pdf:'PDF', png:'PNG', jpg:'JPG', jpeg:'JPEG' };
 
-function getExt(name) { return (name.split('.').pop() || '').toLowerCase(); }
+function getExt(n) { return (n.split('.').pop() || '').toLowerCase(); }
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+function formatBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1048576) return `${(b/1024).toFixed(1)} KB`;
+  return `${(b/1048576).toFixed(2)} MB`;
 }
 
-/* ── UUID helper ───────────────────────────────────────────── */
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2,'0')}`;
+}
+
 function uuid() {
   return crypto.randomUUID
     ? crypto.randomUUID()
     : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = Math.random() * 16 | 0;
-        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        const r = Math.random()*16|0;
+        return (c==='x'?r:(r&0x3|0x8)).toString(16);
       });
 }
 
-/* ── UI helpers ─────────────────────────────────────────────── */
+/* ── Phase switcher ── */
+function showPhase(name) {
+  phaseUpload.hidden   = name !== 'upload';
+  phaseProgress.hidden = name !== 'progress';
+  phaseResults.hidden  = name !== 'results';
+  phaseError.hidden    = name !== 'error';
+}
+
+/* ── Progress bar ── */
+function setProgress(pct, label) {
+  const v = Math.min(Math.max(pct, 0), 100);
+  progressFill.style.width = `${v}%`;
+  progressGlow.style.left  = `${v}%`;
+  progressPct.textContent  = `${Math.round(v)}%`;
+  if (label) procLabel.textContent = label;
+}
+
+/* ── Step state: 'idle' | 'active' | 'done' ── */
+function setStep(el, state) {
+  if (!el) return;
+  el.classList.remove('active','done');
+  if (state === 'active') el.classList.add('active');
+  if (state === 'done')   el.classList.add('done');
+}
+function setConn(el, active) {
+  if (el) el.classList.toggle('active', active);
+}
+
+/* ── File selected UI ── */
 function showFile(file) {
   selectedFile = file;
-  dzDefault.hidden = true;
-  dzFile.hidden = false;
-  dzFileName.textContent = file.name;
-  dzFileSize.textContent = formatBytes(file.size);
-  dzFileIcon.textContent = FILE_ICONS[getExt(file.name)] || '📄';
+  const ext = getExt(file.name);
+  dzIdle.hidden     = true;
+  dzDragover.hidden = true;
+  dzFile.hidden     = false;
+  dzFileEmoji.textContent = FILE_ICONS[ext] || '📄';
+  dzFileName.textContent  = file.name;
+  dzFileSize.textContent  = formatBytes(file.size);
+  dzFileType.textContent  = FILE_LABELS[ext] || ext.toUpperCase();
   dropZone.classList.add('has-file');
   convertBtn.disabled = false;
+  // Animate the file bar fill
+  const bar = dzFile.querySelector('.dz-file-bar-fill');
+  if (bar) { bar.style.width = '0'; requestAnimationFrame(() => { bar.style.width = '100%'; }); }
 }
 
 function clearFile() {
   selectedFile = null;
   fileInput.value = '';
-  dzDefault.hidden = false;
-  dzFile.hidden = true;
-  dropZone.classList.remove('has-file', 'drag-over');
+  dzIdle.hidden     = false;
+  dzDragover.hidden = true;
+  dzFile.hidden     = true;
+  dropZone.classList.remove('has-file','drag-over');
   convertBtn.disabled = true;
 }
 
 function resetUI() {
   if (currentSSE) { currentSSE.close(); currentSSE = null; }
+  stopVisualizer();
   clearFile();
-  progressSec.hidden  = true;
-  resultsSec.hidden   = true;
-  errorSec.hidden     = true;
+  showPhase('upload');
   convertBtn.classList.remove('loading');
-  convertBtn.disabled = true;
-  setProgress(0, 'Uploading file');
-  setStep('upload', 'pending');
-  setStep('extract', 'pending');
-  setStep('synth', 'pending');
-  setStep('done', 'pending');
-  setLines(false, false, false);
+  setProgress(0, 'Starting…');
+  [stepUpload, stepExtract, stepSynth, stepDone].forEach(s => setStep(s,'idle'));
+  [conn1, conn2, conn3].forEach(c => setConn(c, false));
   audioPlayer.src = '';
+  audioPlayer.pause();
+  uploadStartTime = null;
 }
 
 function showError(msg) {
-  progressSec.hidden  = true;
-  resultsSec.hidden   = true;
-  errorSec.hidden     = false;
+  showPhase('error');
   errorMsg.textContent = msg;
   convertBtn.classList.remove('loading');
-  convertBtn.disabled = false;
 }
 
-/* ── Progress / steps ──────────────────────────────────────── */
-function setProgress(pct, label) {
-  progressBar.style.width = `${Math.min(pct, 100)}%`;
-  progressBarW.setAttribute('aria-valuenow', pct);
-  if (label) progressStatus.textContent = label;
-}
-
-// state: 'pending' | 'active' | 'done'
-function setStep(name, state) {
-  const el = document.getElementById(`step-${name}`);
-  if (!el) return;
-  el.classList.remove('active', 'done');
-  if (state === 'active') el.classList.add('active');
-  if (state === 'done')   el.classList.add('done');
-}
-
-function setLines(l1, l2, l3) {
-  const lines = document.querySelectorAll('.step-line');
-  if (lines[0]) lines[0].classList.toggle('active', l1);
-  if (lines[1]) lines[1].classList.toggle('active', l2);
-  if (lines[2]) lines[2].classList.toggle('active', l3);
-}
-
-/* ── Drag and drop ──────────────────────────────────────────── */
-dropZone.addEventListener('dragenter', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+/* ── Drag & drop ── */
+dropZone.addEventListener('dragenter', e => {
+  e.preventDefault();
+  dzIdle.hidden = true; dzDragover.hidden = false;
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); });
 dropZone.addEventListener('dragleave', e => {
-  if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over');
+  if (!dropZone.contains(e.relatedTarget)) {
+    dzIdle.hidden = false; dzDragover.hidden = true;
+    dropZone.classList.remove('drag-over');
+  }
 });
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  const file = e.dataTransfer?.files?.[0];
-  if (file) showFile(file);
+  const f = e.dataTransfer?.files?.[0];
+  if (f) showFile(f);
+  else { dzIdle.hidden = false; dzDragover.hidden = true; }
 });
-
 dropZone.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
 });
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) showFile(fileInput.files[0]); });
+dzRemove.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); clearFile(); });
 
-fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) showFile(fileInput.files[0]);
-});
-
-dzRemove.addEventListener('click', e => {
-  e.stopPropagation();
-  e.preventDefault();
-  clearFile();
-});
-
-/* ── Reset buttons ─────────────────────────────────────────── */
+/* ── Reset ── */
 resetBtn.addEventListener('click', resetUI);
 errorResetBtn.addEventListener('click', resetUI);
 
-/* ── Main conversion flow ────────────────────────────────────── */
+/* ── Convert ── */
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
   await runConversion(selectedFile);
 });
 
+/* ══════════════════════════════════════════════
+   MAIN CONVERSION FLOW
+═══════════════════════════════════════════════ */
 async function runConversion(file) {
-  // UI: loading state
   convertBtn.classList.add('loading');
   convertBtn.disabled = true;
-  progressSec.hidden  = false;
-  resultsSec.hidden   = true;
-  errorSec.hidden     = true;
+  showPhase('progress');
 
-  setStep('upload', 'active');
-  setProgress(5, 'Uploading file…');
+  setStep(stepUpload, 'active');
+  setProgress(3, 'Uploading file…');
 
   try {
-    /* ── Step 1: Upload file ── */
-    const uploadedPath = await uploadFile(file);
-    setStep('upload', 'done');
-    setStep('extract', 'active');
-    setLines(true, false, false);
-    setProgress(25, 'Extracting text…');
+    /* ── 1. UPLOAD with timing ── */
+    uploadStartTime = performance.now();
+    const serverPath = await uploadFile(file);
+    const uploadMs   = performance.now() - uploadStartTime;
+    const uploadSec  = (uploadMs / 1000).toFixed(1);
 
-    /* ── Step 2: Queue job ── */
+    setStep(stepUpload, 'done');
+    setConn(conn1, true);
+    setStep(stepExtract, 'active');
+    setProgress(28, `Uploaded in ${uploadSec}s — Extracting text…`);
+
+    /* ── 2. QUEUE ── */
     const sessionHash = uuid();
-    const eventId = await queueJob(uploadedPath, file.name, sessionHash);
-    setProgress(35, 'Job queued — waiting for model…');
+    await queueJob(serverPath, file.name, sessionHash);
+    setProgress(38, 'Job queued — waiting for model…');
 
-    /* ── Step 3: Stream results ── */
-    await streamResults(sessionHash, eventId);
+    /* ── 3. STREAM ── */
+    await streamResults(sessionHash);
 
   } catch (err) {
     console.error(err);
@@ -212,198 +238,374 @@ async function runConversion(file) {
   }
 }
 
-/* ── Step 1: Upload ────────────────────────────────────────── */
-async function uploadFile(file) {
-  const fd = new FormData();
-  fd.append('files', file, file.name);
+/* ── Upload (with XHR for real progress) ── */
+function uploadFile(file) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const fd  = new FormData();
+    fd.append('files', file, file.name);
 
-  const res = await fetch(`${BASE}/gradio_api/upload`, {
-    method: 'POST',
-    body: fd,
+    xhr.upload.addEventListener('progress', e => {
+      if (e.lengthComputable) {
+        const pct = (e.loaded / e.total) * 25; // 0-25%
+        const elapsed = ((performance.now() - uploadStartTime) / 1000).toFixed(1);
+        setProgress(pct, `Uploading… ${Math.round(e.loaded/1024)}KB / ${Math.round(e.total/1024)}KB · ${elapsed}s`);
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        return reject(new Error(`Upload failed (${xhr.status})`));
+      }
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (!Array.isArray(data) || !data[0]) throw new Error('Bad upload response');
+        resolve(typeof data[0] === 'string' ? data[0] : data[0].path);
+      } catch (e) { reject(e); }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Network error during upload.')));
+    xhr.open('POST', `${BASE}/gradio_api/upload`);
+    xhr.send(fd);
   });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Upload failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  // Returns array of paths, e.g. ["tmp/xyz/filename.pdf"]
-  if (!Array.isArray(data) || !data[0]) {
-    throw new Error('Unexpected upload response from server.');
-  }
-  return typeof data[0] === 'string' ? data[0] : data[0].path;
 }
 
-/* ── Step 2: Queue job ─────────────────────────────────────── */
+/* ── Queue job ── */
 async function queueJob(serverPath, origName, sessionHash) {
-  const payload = {
-    data: [{
-      path: serverPath,
-      orig_name: origName,
-      meta: { _type: 'gradio.FileData' }
-    }],
-    fn_index: 0,
-    session_hash: sessionHash,
-    trigger_id: null,
-    event_data: null,
-  };
-
   const res = await fetch(`${BASE}/gradio_api/queue/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      data: [{ path: serverPath, orig_name: origName, meta: { _type: 'gradio.FileData' } }],
+      fn_index: 0,
+      session_hash: sessionHash,
+      trigger_id: null,
+      event_data: null,
+    }),
   });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Queue join failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-
-  const json = await res.json();
-  return json.event_id;
+  if (!res.ok) throw new Error(`Queue join failed (${res.status})`);
+  return (await res.json()).event_id;
 }
 
-/* ── Step 3: SSE stream ────────────────────────────────────── */
-function streamResults(sessionHash, eventId) {
+/* ── SSE stream ── */
+function streamResults(sessionHash) {
   return new Promise((resolve, reject) => {
-    const url = `${BASE}/gradio_api/queue/data?session_hash=${encodeURIComponent(sessionHash)}`;
-    const sse  = new EventSource(url);
+    const sse = new EventSource(`${BASE}/gradio_api/queue/data?session_hash=${encodeURIComponent(sessionHash)}`);
     currentSSE = sse;
-
     let synthStarted = false;
 
-    sse.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
+    const timeout = setTimeout(() => {
+      sse.close(); currentSSE = null;
+      reject(new Error('Timed out after 10 minutes. Try a smaller file.'));
+    }, 10 * 60 * 1000);
 
+    sse.onmessage = e => {
+      let msg; try { msg = JSON.parse(e.data); } catch { return; }
       const type = msg.msg;
-
-      if (type === 'send_hash') {
-        // Nothing needed
-        return;
-      }
 
       if (type === 'estimation') {
         const rank = msg.rank ?? 0;
-        if (rank > 0) {
-          setProgress(38, `Queue position: ${rank}…`);
-        }
+        if (rank > 0) setProgress(40, `Queue position ${rank} — please wait…`);
         return;
       }
-
       if (type === 'process_starts') {
-        setStep('extract', 'done');
-        setStep('synth', 'active');
-        setLines(true, true, false);
-        setProgress(50, 'Synthesizing speech…');
+        setStep(stepExtract, 'done');
+        setConn(conn2, true);
+        setStep(stepSynth, 'active');
+        setProgress(52, 'Synthesizing speech…');
         synthStarted = true;
         return;
       }
-
       if (type === 'heartbeat' || type === 'process_generating') {
-        if (!synthStarted) {
-          setStep('synth', 'active');
-          synthStarted = true;
-        }
-        // Animate progress between 50 and 88
-        const curr = parseFloat(progressBar.style.width || '50');
-        if (curr < 88) setProgress(Math.min(curr + 4, 88), 'Synthesizing speech…');
+        if (!synthStarted) { setStep(stepSynth,'active'); synthStarted = true; }
+        const cur = parseFloat(progressFill.style.width || '52');
+        if (cur < 88) setProgress(Math.min(cur + 3, 88), 'Synthesizing speech…');
         return;
       }
-
       if (type === 'process_completed') {
-        sse.close();
-        currentSSE = null;
-
-        const output = msg.output;
-        if (output?.error) {
-          reject(new Error(output.error));
-          return;
-        }
-
-        const data = output?.data;
-        if (!Array.isArray(data) || data.length < 3) {
-          reject(new Error('Unexpected response structure from model.'));
-          return;
-        }
-
-        setStep('synth', 'done');
-        setStep('done', 'done');
-        setLines(true, true, true);
-        setProgress(100, 'Complete!');
-
-        handleCompletion(data[0], data[1], data[2]);
+        clearTimeout(timeout); sse.close(); currentSSE = null;
+        const out = msg.output;
+        if (out?.error) return reject(new Error(out.error));
+        const data = out?.data;
+        if (!Array.isArray(data) || data.length < 3) return reject(new Error('Unexpected response from model.'));
+        setStep(stepSynth,'done'); setConn(conn3,true); setStep(stepDone,'done');
+        setProgress(100, 'Done!');
+        setTimeout(() => handleCompletion(data[0], data[1], data[2]), 600);
         resolve();
         return;
       }
-
       if (type === 'process_error' || type === 'error') {
-        sse.close();
-        currentSSE = null;
-        reject(new Error(msg.output?.error || 'Processing error on the server.'));
-        return;
+        clearTimeout(timeout); sse.close(); currentSSE = null;
+        reject(new Error(msg.output?.error || 'Server processing error.'));
       }
     };
 
-    sse.onerror = (e) => {
-      sse.close();
-      currentSSE = null;
-      reject(new Error('Connection to model server lost. The space may be waking up — please try again in a moment.'));
-    };
-
-    // Safety timeout: 10 minutes (CPU can be slow)
-    const timeout = setTimeout(() => {
-      sse.close();
-      currentSSE = null;
-      reject(new Error('Request timed out after 10 minutes. Large files may take longer — try a smaller file or try again.'));
-    }, 10 * 60 * 1000);
-
-    // Clear timeout on completion
-    const origOnMessage = sse.onmessage;
-    sse.onmessage = (e) => {
-      origOnMessage(e);
-      // Check if we resolved/rejected — if sse is closed, clear timeout
-      if (sse.readyState === EventSource.CLOSED) clearTimeout(timeout);
+    sse.onerror = () => {
+      clearTimeout(timeout); sse.close(); currentSSE = null;
+      reject(new Error('Connection lost. The space may be waking up — please try again.'));
     };
   });
 }
 
-/* ── Handle results ────────────────────────────────────────── */
+/* ── Completion ── */
 function handleCompletion(audioData, txtData, statusText) {
   convertBtn.classList.remove('loading');
-  progressSec.hidden = true;
-  resultsSec.hidden  = false;
+  showPhase('results');
 
-  resultsStatusText.textContent = typeof statusText === 'string'
-    ? statusText
-    : 'Your document has been converted to speech.';
+  /* Status text — include total time */
+  const totalSec = uploadStartTime
+    ? ((performance.now() - uploadStartTime) / 1000).toFixed(0)
+    : null;
+  resultStatusText.textContent = totalSec
+    ? `Completed in ${totalSec}s · ${typeof statusText === 'string' ? statusText : 'Your audio is ready'}`
+    : (typeof statusText === 'string' ? statusText : 'Your audio is ready');
 
-  // Audio
-  if (audioData?.url) {
-    audioPlayer.src = audioData.url;
-    downloadAudio.href = audioData.url;
-    downloadAudio.download = audioData.orig_name || 'kokoro_speech.mp3';
-  } else if (audioData?.path) {
-    const audioUrl = `${BASE}/gradio_api/file=${encodeURIComponent(audioData.path)}`;
+  /* Set audio src */
+  let audioUrl = null;
+  if (audioData?.url) audioUrl = audioData.url;
+  else if (audioData?.path) audioUrl = `${BASE}/gradio_api/file=${encodeURIComponent(audioData.path)}`;
+
+  if (audioUrl) {
     audioPlayer.src = audioUrl;
     downloadAudio.href = audioUrl;
-    downloadAudio.download = audioData.orig_name || 'kokoro_speech.mp3';
+    downloadAudio.download = audioData?.orig_name || 'kokoro_speech.mp3';
   }
 
-  // Text file
+  /* Text file */
   if (txtData?.url) {
     downloadTxt.href = txtData.url;
-    downloadTxt.download = txtData.orig_name || 'processed_text.txt';
+    downloadTxt.download = txtData?.orig_name || 'processed_text.txt';
   } else if (txtData?.path) {
-    const txtUrl = `${BASE}/gradio_api/file=${encodeURIComponent(txtData.path)}`;
-    downloadTxt.href = txtUrl;
-    downloadTxt.download = txtData.orig_name || 'processed_text.txt';
+    const u = `${BASE}/gradio_api/file=${encodeURIComponent(txtData.path)}`;
+    downloadTxt.href = u;
+    downloadTxt.download = txtData?.orig_name || 'processed_text.txt';
   } else {
-    // Hide txt download if not available
-    downloadTxt.hidden = true;
+    downloadTxt.style.display = 'none';
   }
 
-  // Smooth scroll to results
-  resultsSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  confetti();
+  initPlayer();
+  phaseResults.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
+
+/* ══════════════════════════════════════════════
+   CUSTOM AUDIO PLAYER
+═══════════════════════════════════════════════ */
+function initPlayer() {
+  audioPlayer.addEventListener('loadedmetadata', () => {
+    apcDuration.textContent = formatTime(audioPlayer.duration);
+    apcSeek.max = audioPlayer.duration;
+  });
+  audioPlayer.addEventListener('timeupdate', () => {
+    apcCurrent.textContent = formatTime(audioPlayer.currentTime);
+    apcSeek.value = audioPlayer.currentTime;
+  });
+  audioPlayer.addEventListener('ended', () => {
+    playIcon.style.display = ''; pauseIcon.style.display = 'none';
+    vizIdle.style.display = 'flex';
+    stopVisualizer();
+  });
+}
+
+apcPlay.addEventListener('click', () => {
+  if (audioPlayer.paused) {
+    audioPlayer.play();
+    playIcon.style.display = 'none'; pauseIcon.style.display = '';
+    vizIdle.style.display = 'none';
+    startVisualizer();
+  } else {
+    audioPlayer.pause();
+    playIcon.style.display = ''; pauseIcon.style.display = 'none';
+    stopVisualizer();
+  }
+});
+
+apcSeek.addEventListener('input', () => { audioPlayer.currentTime = apcSeek.value; });
+apcVol.addEventListener('click', () => { audioPlayer.muted = !audioPlayer.muted; apcVol.style.opacity = audioPlayer.muted ? '0.4' : '1'; });
+
+/* ── Canvas visualizer ── */
+function startVisualizer() {
+  const canvas = document.getElementById('visualizer');
+  if (!canvas) return;
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaElementSource(audioPlayer);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    } catch { return; }
+  }
+  const ctx  = canvas.getContext('2d');
+  const buf  = new Uint8Array(analyser.frequencyBinCount);
+  const W    = canvas.width;
+  const H    = canvas.height;
+  const draw = () => {
+    vizRaf = requestAnimationFrame(draw);
+    analyser.getByteFrequencyData(buf);
+    ctx.clearRect(0, 0, W, H);
+    const barW = W / buf.length * 2.5;
+    let x = 0;
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, '#c084fc');
+    grad.addColorStop(1, '#38bdf8');
+    buf.forEach(v => {
+      const h = (v / 255) * H;
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(x, H - h, barW - 2, h, 3);
+      ctx.fill();
+      x += barW + 1;
+    });
+  };
+  draw();
+}
+
+function stopVisualizer() {
+  if (vizRaf) { cancelAnimationFrame(vizRaf); vizRaf = null; }
+  const canvas = document.getElementById('visualizer');
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+}
+
+/* ── Size canvas on load ── */
+window.addEventListener('load', () => {
+  const canvas = document.getElementById('visualizer');
+  if (canvas) { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; }
+});
+
+/* ══════════════════════════════════════════════
+   CONFETTI
+═══════════════════════════════════════════════ */
+function confetti() {
+  const container = document.getElementById('confetti-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const colors = ['#c084fc','#38bdf8','#34d399','#fbbf24','#f472b6','#818cf8'];
+  for (let i = 0; i < 60; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-piece';
+    p.style.cssText = `
+      left:${Math.random()*100}%;
+      background:${colors[Math.floor(Math.random()*colors.length)]};
+      width:${6+Math.random()*6}px;
+      height:${6+Math.random()*6}px;
+      border-radius:${Math.random()>0.5?'50%':'2px'};
+      animation-delay:${Math.random()*0.6}s;
+      animation-duration:${0.8+Math.random()*0.8}s;
+    `;
+    container.appendChild(p);
+  }
+  setTimeout(() => { if (container) container.innerHTML = ''; }, 2500);
+}
+
+/* ══════════════════════════════════════════════
+   BACKGROUND CANVAS PARTICLES
+═══════════════════════════════════════════════ */
+(function initBgCanvas() {
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+
+  function resize() {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+
+  function mkParticle() {
+    return {
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: 1 + Math.random() * 2,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      a: 0.1 + Math.random() * 0.4,
+      hue: Math.random() > 0.5 ? 270 : 200,
+    };
+  }
+
+  function init() { resize(); particles = Array.from({length: 80}, mkParticle); }
+
+  function tick() {
+    requestAnimationFrame(tick);
+    ctx.clearRect(0, 0, W, H);
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${p.hue}, 70%, 70%, ${p.a})`;
+      ctx.fill();
+    });
+  }
+
+  window.addEventListener('resize', resize);
+  init(); tick();
+})();
+
+/* ══════════════════════════════════════════════
+   TYPEWRITER
+═══════════════════════════════════════════════ */
+(function typewriter() {
+  const el = document.getElementById('typewriter-text');
+  const cursor = document.querySelector('.typewriter-cursor');
+  if (!el) return;
+  const phrases = ['Into Spoken Audio', 'Into Natural Speech', 'Into an Audiobook'];
+  let pi = 0, ci = 0, deleting = false;
+
+  function tick() {
+    const phrase = phrases[pi];
+    if (!deleting) {
+      el.textContent = phrase.slice(0, ++ci);
+      if (ci === phrase.length) { deleting = true; setTimeout(tick, 2200); return; }
+    } else {
+      el.textContent = phrase.slice(0, --ci);
+      if (ci === 0) { deleting = false; pi = (pi + 1) % phrases.length; }
+    }
+    setTimeout(tick, deleting ? 45 : 80);
+  }
+  setTimeout(tick, 800);
+  setInterval(() => { if (cursor) cursor.style.opacity = cursor.style.opacity === '0' ? '1' : '0'; }, 500);
+})();
+
+/* ══════════════════════════════════════════════
+   COUNTER ANIMATION
+═══════════════════════════════════════════════ */
+(function animateCounters() {
+  const els = document.querySelectorAll('.stat-number[data-target]');
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      const el = entry.target;
+      const target = parseInt(el.dataset.target, 10);
+      let cur = 0;
+      const step = Math.ceil(target / 40);
+      const t = setInterval(() => {
+        cur = Math.min(cur + step, target);
+        el.textContent = cur;
+        if (cur >= target) clearInterval(t);
+      }, 30);
+      obs.unobserve(el);
+    });
+  }, { threshold: 0.5 });
+  els.forEach(el => obs.observe(el));
+})();
+
+/* ══════════════════════════════════════════════
+   CARD TILT
+═══════════════════════════════════════════════ */
+(function cardTilt() {
+  const card = document.getElementById('converter-card');
+  if (!card || window.matchMedia('(hover:none)').matches) return;
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width  - 0.5;
+    const y = (e.clientY - r.top)  / r.height - 0.5;
+    card.style.transform = `perspective(800px) rotateY(${x*6}deg) rotateX(${-y*6}deg) translateZ(8px)`;
+  });
+  card.addEventListener('mouseleave', () => {
+    card.style.transform = 'perspective(800px) rotateY(0deg) rotateX(0deg) translateZ(0)';
+  });
+})();

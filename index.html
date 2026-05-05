@@ -7,100 +7,150 @@
   <meta name="description" content="Transform your documents into natural-sounding speech with Kokoro-82M. Upload a PDF, image, or text file and receive a high-quality MP3 narration powered by StyleTTS2." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <!-- Animated background -->
-  <div class="bg-orbs" aria-hidden="true">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
-  </div>
 
-  <!-- Grid overlay -->
-  <div class="grid-overlay" aria-hidden="true"></div>
+  <!-- ── Canvas particle field ── -->
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
 
-  <header class="header">
+  <!-- ── Noise texture overlay ── -->
+  <div class="noise" aria-hidden="true"></div>
+
+  <!-- ── Header ── -->
+  <header class="header" id="header">
     <div class="header-inner">
-      <div class="logo">
+      <a href="#main" class="logo" aria-label="Kokoro TTS home">
         <div class="logo-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-            <circle cx="14" cy="14" r="13" stroke="url(#lg1)" stroke-width="2"/>
-            <path d="M9 14 Q14 8 19 14 Q14 20 9 14Z" fill="url(#lg1)" opacity="0.9"/>
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
             <defs>
-              <linearGradient id="lg1" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stop-color="#a78bfa"/>
+              <linearGradient id="logoGrad" x1="0" y1="0" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#c084fc"/>
                 <stop offset="100%" stop-color="#38bdf8"/>
               </linearGradient>
             </defs>
+            <path d="M11 2C6 2 2 6 2 11s4 9 9 9 9-4 9-9-4-9-9-9z" stroke="url(#logoGrad)" stroke-width="1.5" fill="none"/>
+            <path d="M7 11 Q11 6.5 15 11 Q11 15.5 7 11Z" fill="url(#logoGrad)"/>
           </svg>
         </div>
         <span class="logo-text">Kokoro<span class="logo-accent">TTS</span></span>
+      </a>
+      <div class="header-right">
+        <div class="header-badges" role="list" aria-label="Model info">
+          <span class="badge badge-live" role="listitem">
+            <span class="live-dot" aria-hidden="true"></span>Live
+          </span>
+          <span class="badge badge-model" role="listitem">Kokoro-82M</span>
+          <span class="badge badge-arch" role="listitem">StyleTTS2</span>
+          <span class="badge badge-hz" role="listitem">24 kHz</span>
+        </div>
       </div>
-      <nav class="header-badges">
-        <span class="badge badge-model">Kokoro-82M</span>
-        <span class="badge badge-arch">StyleTTS2</span>
-        <span class="badge badge-hz">24 kHz</span>
-      </nav>
     </div>
   </header>
 
   <main class="main" id="main">
-    <!-- Hero section -->
+
+    <!-- ── Hero ── -->
     <section class="hero" aria-labelledby="hero-title">
+
+      <!-- Waveform decoration -->
+      <div class="hero-wave" aria-hidden="true">
+        <div class="wave-bars">
+          <!-- 28 bars, animated via CSS -->
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
       <div class="hero-eyebrow">
         <span class="pulse-dot" aria-hidden="true"></span>
         AI-Powered Text-to-Speech
       </div>
+
       <h1 id="hero-title" class="hero-title">
-        Turn Any Document<br />
-        <span class="gradient-text">Into Spoken Audio</span>
+        <span class="line1">Turn Any Document</span><br/>
+        <span class="gradient-text" id="typewriter-text"></span><span class="typewriter-cursor" aria-hidden="true">|</span>
       </h1>
+
       <p class="hero-subtitle">
-        Upload a PDF, image, or text file. Kokoro-82M reads it aloud with natural,
-        expressive speech — powered by StyleTTS2 at 24 kHz.
+        Upload a <strong>PDF, image,</strong> or <strong>text file</strong>. Kokoro-82M reads it aloud with
+        natural, expressive speech — powered by StyleTTS2 at 24 kHz.
       </p>
 
-      <!-- Format pills -->
-      <div class="format-pills" role="list" aria-label="Supported file formats">
-        <div class="format-pill" role="listitem">
-          <span class="format-icon">📄</span>
-          <div>
-            <div class="format-name">.txt</div>
-            <div class="format-method">Direct read</div>
-          </div>
+      <!-- Stats row -->
+      <div class="hero-stats" role="list" aria-label="Model statistics">
+        <div class="stat-item" role="listitem">
+          <div class="stat-number" data-target="82">0</div>
+          <div class="stat-label">Million Params</div>
         </div>
-        <div class="format-pill" role="listitem">
-          <span class="format-icon">📑</span>
-          <div>
-            <div class="format-name">.pdf (digital)</div>
-            <div class="format-method">pdfplumber</div>
-          </div>
+        <div class="stat-divider" aria-hidden="true"></div>
+        <div class="stat-item" role="listitem">
+          <div class="stat-number" data-target="24">0</div>
+          <div class="stat-label">kHz Audio</div>
         </div>
-        <div class="format-pill" role="listitem">
-          <span class="format-icon">🔍</span>
-          <div>
-            <div class="format-name">.pdf (scanned)</div>
-            <div class="format-method">EasyOCR</div>
-          </div>
-        </div>
-        <div class="format-pill" role="listitem">
-          <span class="format-icon">🖼️</span>
-          <div>
-            <div class="format-name">.png / .jpg</div>
-            <div class="format-method">EasyOCR</div>
-          </div>
+        <div class="stat-divider" aria-hidden="true"></div>
+        <div class="stat-item" role="listitem">
+          <div class="stat-number" data-target="4">0</div>
+          <div class="stat-label">File Formats</div>
         </div>
       </div>
+
+      <!-- Format cards -->
+      <div class="format-cards" role="list" aria-label="Supported file formats">
+        <div class="format-card" role="listitem" tabindex="0">
+          <div class="fc-glow" aria-hidden="true"></div>
+          <div class="fc-icon" aria-hidden="true">📄</div>
+          <div class="fc-name">.txt</div>
+          <div class="fc-method">Direct read</div>
+        </div>
+        <div class="format-card" role="listitem" tabindex="0">
+          <div class="fc-glow" aria-hidden="true"></div>
+          <div class="fc-icon" aria-hidden="true">📑</div>
+          <div class="fc-name">.pdf <span class="fc-tag">digital</span></div>
+          <div class="fc-method">pdfplumber</div>
+        </div>
+        <div class="format-card" role="listitem" tabindex="0">
+          <div class="fc-glow" aria-hidden="true"></div>
+          <div class="fc-icon" aria-hidden="true">🔍</div>
+          <div class="fc-name">.pdf <span class="fc-tag">scanned</span></div>
+          <div class="fc-method">EasyOCR</div>
+        </div>
+        <div class="format-card" role="listitem" tabindex="0">
+          <div class="fc-glow" aria-hidden="true"></div>
+          <div class="fc-icon" aria-hidden="true">🖼️</div>
+          <div class="fc-name">.png / .jpg</div>
+          <div class="fc-method">EasyOCR</div>
+        </div>
+      </div>
+
     </section>
 
-    <!-- Main card -->
-    <section class="card-wrapper" aria-label="File conversion tool">
+    <!-- ── Converter card ── -->
+    <section class="card-section" aria-label="Document to speech converter" id="converter-section">
       <div class="card" id="converter-card">
 
-        <!-- Upload zone -->
-        <div class="upload-section">
+        <!-- Glowing border -->
+        <div class="card-glow" aria-hidden="true"></div>
+
+        <!-- Upload phase -->
+        <div class="phase" id="phase-upload">
+          <div class="phase-header">
+            <div class="phase-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div>
+              <div class="phase-title">Upload Your Document</div>
+              <div class="phase-sub">Drag & drop or click to browse</div>
+            </div>
+          </div>
+
           <div
             class="drop-zone"
             id="drop-zone"
@@ -109,104 +159,211 @@
             aria-label="Upload file. Click to browse or drag and drop."
             aria-describedby="file-hint"
           >
-            <input
-              type="file"
-              id="file-input"
-              accept=".txt,.pdf,.png,.jpg,.jpeg"
-              aria-hidden="true"
-              tabindex="-1"
-            />
+            <input type="file" id="file-input" accept=".txt,.pdf,.png,.jpg,.jpeg" aria-hidden="true" tabindex="-1" />
 
-            <!-- Default state -->
-            <div class="dz-default" id="dz-default">
-              <div class="dz-icon-wrap" aria-hidden="true">
-                <div class="dz-icon-ring"></div>
-                <svg class="dz-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-                  <path d="M24 8v20M16 16l8-8 8 8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M8 32v4a4 4 0 004 4h24a4 4 0 004-4v-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <!-- Idle state -->
+            <div class="dz-idle" id="dz-idle">
+              <div class="dz-rings" aria-hidden="true">
+                <div class="ring r1"></div>
+                <div class="ring r2"></div>
+                <div class="ring r3"></div>
+                <svg class="dz-upload-icon" viewBox="0 0 48 48" fill="none">
+                  <path d="M24 10v20M15 18l9-9 9 9" stroke="url(#uploadGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M8 34v4a4 4 0 004 4h24a4 4 0 004-4v-4" stroke="url(#uploadGrad)" stroke-width="2.5" stroke-linecap="round"/>
+                  <defs>
+                    <linearGradient id="uploadGrad" x1="8" y1="10" x2="40" y2="42" gradientUnits="userSpaceOnUse">
+                      <stop stop-color="#c084fc"/>
+                      <stop offset="1" stop-color="#38bdf8"/>
+                    </linearGradient>
+                  </defs>
                 </svg>
               </div>
-              <div class="dz-label">Drop your file here</div>
-              <div class="dz-sublabel">or <span class="dz-browse">click to browse</span></div>
-              <div class="dz-formats" id="file-hint">TXT · PDF · PNG · JPG · JPEG</div>
+              <div class="dz-idle-title">Drop your file here</div>
+              <div class="dz-idle-sub">or <span class="dz-browse-link">click to browse</span></div>
+              <div class="dz-formats" id="file-hint">TXT &nbsp;·&nbsp; PDF &nbsp;·&nbsp; PNG &nbsp;·&nbsp; JPG</div>
+            </div>
+
+            <!-- Drag-over state -->
+            <div class="dz-dragover" id="dz-dragover" hidden>
+              <div class="dz-drop-icon" aria-hidden="true">📥</div>
+              <div class="dz-drop-text">Release to upload</div>
             </div>
 
             <!-- File selected state -->
             <div class="dz-file" id="dz-file" hidden>
-              <div class="dz-file-icon" id="dz-file-icon" aria-hidden="true">📄</div>
-              <div class="dz-file-info">
-                <div class="dz-file-name" id="dz-file-name">filename.pdf</div>
-                <div class="dz-file-size" id="dz-file-size">0 KB</div>
+              <div class="dz-file-preview">
+                <div class="dz-file-emoji" id="dz-file-emoji" aria-hidden="true">📄</div>
+                <div class="dz-file-details">
+                  <div class="dz-file-name" id="dz-file-name">document.pdf</div>
+                  <div class="dz-file-meta">
+                    <span id="dz-file-size">0 KB</span>
+                    <span class="dz-file-type-badge" id="dz-file-type">PDF</span>
+                  </div>
+                </div>
+                <button class="dz-remove-btn" id="dz-remove" aria-label="Remove file" type="button">
+                  <svg viewBox="0 0 16 16" fill="none" width="14" height="14">
+                    <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                </button>
               </div>
-              <button class="dz-remove" id="dz-remove" aria-label="Remove selected file" type="button">
-                <svg viewBox="0 0 16 16" fill="none" width="16" height="16">
-                  <path d="M12 4L4 12M4 4l8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </button>
+              <div class="dz-file-bar" aria-hidden="true">
+                <div class="dz-file-bar-fill"></div>
+              </div>
             </div>
           </div>
 
-          <!-- Convert button -->
           <button class="convert-btn" id="convert-btn" disabled aria-label="Convert document to speech">
-            <span class="btn-icon" aria-hidden="true">🔊</span>
-            <span class="btn-text">Convert to Speech</span>
-            <span class="btn-spinner" aria-hidden="true"></span>
+            <span class="btn-shimmer" aria-hidden="true"></span>
+            <span class="btn-content">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+                  <path d="M11 5L6 9H2v6h4l5 4V5z" fill="currentColor"/>
+                  <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="btn-text">Convert to Speech</span>
+              <span class="btn-arrow" aria-hidden="true">→</span>
+            </span>
+            <span class="btn-loader" aria-hidden="true">
+              <span class="loader-bars">
+                <span></span><span></span><span></span><span></span><span></span>
+              </span>
+              <span class="loader-text">Processing…</span>
+            </span>
           </button>
         </div>
 
-        <!-- Progress / Status -->
-        <div class="progress-section" id="progress-section" hidden aria-live="polite" aria-label="Processing status">
-          <div class="progress-header">
-            <div class="progress-label">Processing…</div>
-            <div class="progress-status" id="progress-status">Uploading file</div>
+        <!-- Progress phase -->
+        <div class="phase" id="phase-progress" hidden aria-live="polite">
+          <div class="progress-visual">
+            <!-- Animated waveform during processing -->
+            <div class="proc-wave" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <div class="proc-label" id="proc-label">Uploading file…</div>
           </div>
-          <div class="progress-bar-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar-wrap">
-            <div class="progress-bar" id="progress-bar"></div>
+
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill"></div>
+            <div class="progress-glow" id="progress-glow"></div>
           </div>
-          <div class="progress-steps">
-            <div class="step" id="step-upload" data-step="upload">
-              <div class="step-dot"></div>
-              <div class="step-label">Upload</div>
+          <div class="progress-pct" id="progress-pct">0%</div>
+
+          <div class="step-track" role="list" aria-label="Processing steps">
+            <div class="step-item" id="step-upload" role="listitem">
+              <div class="step-circle">
+                <svg class="step-check" viewBox="0 0 16 16" fill="none" width="10" height="10"><path d="M3 8l3.5 3.5L13 4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="step-num">1</span>
+              </div>
+              <span class="step-name">Upload</span>
             </div>
-            <div class="step-line"></div>
-            <div class="step" id="step-extract" data-step="extract">
-              <div class="step-dot"></div>
-              <div class="step-label">Extract Text</div>
+            <div class="step-connector" id="conn-1"></div>
+            <div class="step-item" id="step-extract" role="listitem">
+              <div class="step-circle">
+                <svg class="step-check" viewBox="0 0 16 16" fill="none" width="10" height="10"><path d="M3 8l3.5 3.5L13 4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="step-num">2</span>
+              </div>
+              <span class="step-name">Extract</span>
             </div>
-            <div class="step-line"></div>
-            <div class="step" id="step-synth" data-step="synth">
-              <div class="step-dot"></div>
-              <div class="step-label">Synthesize</div>
+            <div class="step-connector" id="conn-2"></div>
+            <div class="step-item" id="step-synth" role="listitem">
+              <div class="step-circle">
+                <svg class="step-check" viewBox="0 0 16 16" fill="none" width="10" height="10"><path d="M3 8l3.5 3.5L13 4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="step-num">3</span>
+              </div>
+              <span class="step-name">Synthesize</span>
             </div>
-            <div class="step-line"></div>
-            <div class="step" id="step-done" data-step="done">
-              <div class="step-dot"></div>
-              <div class="step-label">Done</div>
+            <div class="step-connector" id="conn-3"></div>
+            <div class="step-item" id="step-done" role="listitem">
+              <div class="step-circle">
+                <svg class="step-check" viewBox="0 0 16 16" fill="none" width="10" height="10"><path d="M3 8l3.5 3.5L13 4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="step-num">4</span>
+              </div>
+              <span class="step-name">Done</span>
             </div>
           </div>
         </div>
 
-        <!-- Results -->
-        <div class="results-section" id="results-section" hidden aria-label="Conversion results">
-          <div class="results-header">
-            <div class="results-check" aria-hidden="true">✅</div>
-            <div>
-              <div class="results-title">Conversion Complete!</div>
-              <div class="results-subtitle" id="results-status-text"></div>
+        <!-- Results phase -->
+        <div class="phase" id="phase-results" hidden aria-label="Conversion results">
+          <!-- Confetti container -->
+          <div class="confetti-container" id="confetti-container" aria-hidden="true"></div>
+
+          <div class="result-success">
+            <div class="success-ring" aria-hidden="true">
+              <svg viewBox="0 0 64 64" fill="none" width="64" height="64">
+                <circle cx="32" cy="32" r="30" stroke="url(#successGrad)" stroke-width="2" class="success-circle"/>
+                <path d="M20 32l8 8 16-16" stroke="url(#successGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="success-check"/>
+                <defs>
+                  <linearGradient id="successGrad" x1="2" y1="2" x2="62" y2="62" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#34d399"/>
+                    <stop offset="1" stop-color="#06b6d4"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+            <div class="success-text">
+              <div class="success-title">Conversion Complete!</div>
+              <div class="success-sub" id="result-status-text">Your audio is ready</div>
             </div>
           </div>
 
-          <!-- Audio player -->
-          <div class="audio-card" id="audio-card">
-            <div class="audio-label">
-              <svg viewBox="0 0 20 20" fill="none" width="18" height="18" aria-hidden="true">
-                <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M7 6.5l7 3.5-7 3.5V6.5z" fill="currentColor"/>
-              </svg>
-              Generated Speech
+          <!-- Custom audio visualizer player -->
+          <div class="audio-player-card" id="audio-card">
+            <div class="apc-header">
+              <div class="apc-title">
+                <svg viewBox="0 0 20 20" fill="none" width="16" height="16" aria-hidden="true">
+                  <circle cx="10" cy="10" r="8.5" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M8 7l5 3-5 3V7z" fill="currentColor"/>
+                </svg>
+                Generated Speech
+              </div>
+              <div class="apc-format">MP3 · 24 kHz</div>
             </div>
-            <audio id="audio-player" controls preload="none" aria-label="Generated speech audio"></audio>
-            <a class="download-btn" id="download-audio" href="#" download aria-label="Download MP3 audio file">
+
+            <!-- Waveform visualizer (canvas) -->
+            <div class="visualizer-wrap">
+              <canvas id="visualizer" aria-hidden="true"></canvas>
+              <div class="visualizer-idle" id="viz-idle" aria-hidden="true">
+                <div class="viz-idle-bars">
+                  <span></span><span></span><span></span><span></span><span></span>
+                  <span></span><span></span><span></span><span></span><span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Hidden native audio element -->
+            <audio id="audio-player" preload="none" aria-label="Generated speech audio" crossorigin="anonymous"></audio>
+
+            <!-- Custom controls -->
+            <div class="apc-controls">
+              <button class="apc-play-btn" id="apc-play" aria-label="Play audio" type="button">
+                <svg id="play-icon" viewBox="0 0 24 24" fill="none" width="22" height="22">
+                  <path d="M6 4l14 8-14 8V4z" fill="currentColor"/>
+                </svg>
+                <svg id="pause-icon" viewBox="0 0 24 24" fill="none" width="22" height="22" style="display:none">
+                  <rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/>
+                  <rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/>
+                </svg>
+              </button>
+              <div class="apc-seek-wrap">
+                <input type="range" class="apc-seek" id="apc-seek" min="0" max="100" value="0" step="0.1" aria-label="Audio position"/>
+                <div class="apc-time">
+                  <span id="apc-current">0:00</span>
+                  <span id="apc-duration">0:00</span>
+                </div>
+              </div>
+              <button class="apc-vol-btn" id="apc-vol" aria-label="Toggle mute" type="button">
+                <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                  <path d="M11 5L6 9H2v6h4l5 4V5z" fill="currentColor"/>
+                  <path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a10 10 0 010 14.14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+
+            <a class="download-audio-btn" id="download-audio" href="#" download aria-label="Download MP3">
               <svg viewBox="0 0 20 20" fill="none" width="16" height="16" aria-hidden="true">
                 <path d="M10 3v10M5 9l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M3 17h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -216,56 +373,87 @@
           </div>
 
           <!-- Text download -->
-          <a class="txt-download-btn" id="download-txt" href="#" download aria-label="Download processed text file">
-            <svg viewBox="0 0 20 20" fill="none" width="16" height="16" aria-hidden="true">
+          <a class="txt-btn" id="download-txt" href="#" download aria-label="Download processed text">
+            <svg viewBox="0 0 20 20" fill="none" width="15" height="15" aria-hidden="true">
               <rect x="4" y="2" width="12" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/>
               <path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
             Download Processed Text (.txt)
           </a>
 
-          <!-- Convert another -->
-          <button class="reset-btn" id="reset-btn" type="button">
-            Convert another file
+          <button class="again-btn" id="reset-btn" type="button">
+            <svg viewBox="0 0 20 20" fill="none" width="15" height="15" aria-hidden="true">
+              <path d="M3.5 9A6.5 6.5 0 1110 3.5H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7 1v4H3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Convert Another File
           </button>
         </div>
 
-        <!-- Error state -->
-        <div class="error-section" id="error-section" hidden role="alert">
-          <div class="error-icon" aria-hidden="true">⚠️</div>
-          <div class="error-title">Something went wrong</div>
-          <div class="error-msg" id="error-msg">Please try again.</div>
-          <button class="reset-btn" id="error-reset-btn" type="button">Try Again</button>
+        <!-- Error phase -->
+        <div class="phase" id="phase-error" hidden role="alert">
+          <div class="error-wrap">
+            <div class="error-icon-wrap" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none" width="48" height="48">
+                <circle cx="24" cy="24" r="22" stroke="#f87171" stroke-width="2"/>
+                <path d="M24 14v12M24 32v2" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="error-title">Something went wrong</div>
+            <div class="error-msg" id="error-msg">Please try again.</div>
+            <button class="again-btn" id="error-reset-btn" type="button">Try Again</button>
+          </div>
         </div>
 
       </div>
 
-      <!-- Info footer inside card area -->
-      <div class="info-strip">
-        <div class="info-item">
-          <span aria-hidden="true">⚡</span> 82M parameters — fast &amp; efficient
+      <!-- Stats strip below card -->
+      <div class="stats-strip" aria-label="Model capabilities">
+        <div class="ss-item">
+          <div class="ss-icon" aria-hidden="true">⚡</div>
+          <div>
+            <div class="ss-val">82M</div>
+            <div class="ss-label">Parameters</div>
+          </div>
         </div>
-        <div class="info-sep" aria-hidden="true">·</div>
-        <div class="info-item">
-          <span aria-hidden="true">🎵</span> 24 kHz studio-quality audio
+        <div class="ss-sep" aria-hidden="true"></div>
+        <div class="ss-item">
+          <div class="ss-icon" aria-hidden="true">🎵</div>
+          <div>
+            <div class="ss-val">24 kHz</div>
+            <div class="ss-label">Sample Rate</div>
+          </div>
         </div>
-        <div class="info-sep" aria-hidden="true">·</div>
-        <div class="info-item">
-          <span aria-hidden="true">🧠</span> OCR for scanned documents
+        <div class="ss-sep" aria-hidden="true"></div>
+        <div class="ss-item">
+          <div class="ss-icon" aria-hidden="true">🔍</div>
+          <div>
+            <div class="ss-val">OCR</div>
+            <div class="ss-label">Scanned docs</div>
+          </div>
         </div>
-        <div class="info-sep" aria-hidden="true">·</div>
-        <div class="info-item">
-          <span aria-hidden="true">⏱️</span> CPU — large files take a few mins
+        <div class="ss-sep" aria-hidden="true"></div>
+        <div class="ss-item">
+          <div class="ss-icon" aria-hidden="true">🎨</div>
+          <div>
+            <div class="ss-val">StyleTTS2</div>
+            <div class="ss-label">Architecture</div>
+          </div>
         </div>
       </div>
     </section>
+
   </main>
 
   <footer class="footer">
-    <p>
-      Powered by <a href="https://huggingface.co/spaces/audio8899/kokorov2" target="_blank" rel="noopener noreferrer">Kokoro-82M</a>
-      on Hugging Face Spaces &nbsp;·&nbsp;
-      Built with StyleTTS2
+    <div class="footer-wave" aria-hidden="true">
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <p class="footer-text">
+      Powered by
+      <a href="https://huggingface.co/spaces/audio8899/kokorov2" target="_blank" rel="noopener noreferrer">Kokoro-82M</a>
+      on Hugging Face Spaces &nbsp;·&nbsp; Built with StyleTTS2
     </p>
   </footer>
 
