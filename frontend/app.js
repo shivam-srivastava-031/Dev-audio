@@ -210,12 +210,19 @@ async function runConversion(file) {
 
   try {
     /* ── 0. Wake up check ── */
-    // A quick fetch to ensure the space is alive
-    await fetch(`${BASE}/config`).catch(() => {
-        // If it fails, wait a bit and retry once
-        return new Promise(r => setTimeout(r, 2000)).then(() => fetch(`${BASE}/config`));
+    // A quick fetch to ensure the space is alive and returning JSON
+    const checkSpace = async () => {
+      const res = await fetch(`${BASE}/config`);
+      if (!res.ok) throw new Error('Not ok');
+      const ct = res.headers.get('content-type');
+      if (!ct || !ct.includes('application/json')) throw new Error('Not JSON');
+      return true;
+    };
+
+    await checkSpace().catch(() => {
+        return new Promise(r => setTimeout(r, 3000)).then(checkSpace);
     }).catch(() => {
-        throw new Error('Hugging Face Space is currently sleeping or unavailable. Please try again in 30 seconds.');
+        throw new Error('Hugging Face Space is currently waking up. This usually takes 1-2 minutes. Please wait a moment and try again.');
     });
 
     /* ── 1. UPLOAD with timing ── */
@@ -261,7 +268,10 @@ function uploadFile(file) {
 
     xhr.addEventListener('load', () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        return reject(new Error(`Upload failed (${xhr.status}). The space might be waking up.`));
+        if (xhr.status === 404) {
+          return reject(new Error(`Upload failed (404). The AI model is currently waking up. Please wait 1-2 minutes and try again.`));
+        }
+        return reject(new Error(`Upload failed (${xhr.status}).`));
       }
       try {
         const data = JSON.parse(xhr.responseText);
