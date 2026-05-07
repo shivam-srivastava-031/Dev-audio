@@ -16,7 +16,7 @@ const dzFileName    = document.getElementById('dz-file-name');
 const dzFileSize    = document.getElementById('dz-file-size');
 const dzFileType    = document.getElementById('dz-file-type');
 const dzRemove      = document.getElementById('dz-remove');
-const convertBtn    = document.getElementById('convert-btn');
+// const convertBtn    = document.getElementById('convert-btn');
 
 const phaseUpload   = document.getElementById('phase-upload');
 const phaseProgress = document.getElementById('phase-progress');
@@ -129,10 +129,12 @@ function showFile(file) {
   dzFileSize.textContent  = formatBytes(file.size);
   dzFileType.textContent  = FILE_LABELS[ext] || ext.toUpperCase();
   dropZone.classList.add('has-file');
-  convertBtn.disabled = false;
+  // convertBtn.disabled = false;
   // Animate the file bar fill
   const bar = dzFile.querySelector('.dz-file-bar-fill');
   if (bar) { bar.style.width = '0'; requestAnimationFrame(() => { bar.style.width = '100%'; }); }
+
+  runConversion(file);
 }
 
 function clearFile() {
@@ -142,7 +144,7 @@ function clearFile() {
   dzDragover.hidden = true;
   dzFile.hidden     = true;
   dropZone.classList.remove('has-file','drag-over');
-  convertBtn.disabled = true;
+  // convertBtn.disabled = true;
 }
 
 function resetUI() {
@@ -150,7 +152,7 @@ function resetUI() {
   stopVisualizer();
   clearFile();
   showPhase('upload');
-  convertBtn.classList.remove('loading');
+  // convertBtn.classList.remove('loading');
   setProgress(0, 'Starting…');
   [stepUpload, stepExtract, stepSynth, stepDone].forEach(s => setStep(s,'idle'));
   [conn1, conn2, conn3].forEach(c => setConn(c, false));
@@ -163,7 +165,7 @@ function showError(msg) {
   console.error('[Kokoro Error]', msg);
   showPhase('error');
   errorMsg.textContent = msg;
-  convertBtn.classList.remove('loading');
+  // convertBtn.classList.remove('loading');
 }
 
 /* ── Drag & drop ── */
@@ -197,17 +199,17 @@ resetBtn.addEventListener('click', resetUI);
 errorResetBtn.addEventListener('click', resetUI);
 
 /* ── Convert ── */
-convertBtn.addEventListener('click', async () => {
-  if (!selectedFile) return;
-  await runConversion(selectedFile);
-});
+// convertBtn.addEventListener('click', async () => {
+//   if (!selectedFile) return;
+//   await runConversion(selectedFile);
+// });
 
 /* ══════════════════════════════════════════════
    MAIN CONVERSION FLOW
 ═══════════════════════════════════════════════ */
 async function runConversion(file) {
-  convertBtn.classList.add('loading');
-  convertBtn.disabled = true;
+  // convertBtn.classList.add('loading');
+  // convertBtn.disabled = true;
   showPhase('progress');
 
   setStep(stepUpload, 'active');
@@ -371,7 +373,7 @@ function streamResults(sessionHash) {
 
 /* ── Completion ── */
 function handleCompletion(audioData, txtData, statusText) {
-  convertBtn.classList.remove('loading');
+  // convertBtn.classList.remove('loading');
   showPhase('results');
 
   /* Status text — include total time */
