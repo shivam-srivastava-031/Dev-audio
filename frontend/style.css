@@ -180,6 +180,7 @@ body {
   margin-bottom: 2rem;
   background: rgba(255,255,255,0.02);
 }
+#file-input { display: none; }
 .drop-zone:hover, .drop-zone.drag-over { border-color: var(--purple); background: rgba(192, 132, 252, 0.05); }
 .dz-idle { display: flex; flex-direction: column; align-items: center; }
 .dz-rings { position: relative; width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; margin-bottom: 1.5rem; }
