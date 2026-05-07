@@ -16,7 +16,7 @@ const dzFileName    = document.getElementById('dz-file-name');
 const dzFileSize    = document.getElementById('dz-file-size');
 const dzFileType    = document.getElementById('dz-file-type');
 const dzRemove      = document.getElementById('dz-remove');
-// const convertBtn    = document.getElementById('convert-btn');
+const convertBtn    = document.getElementById('convert-btn');
 
 const phaseUpload   = document.getElementById('phase-upload');
 const phaseProgress = document.getElementById('phase-progress');
@@ -80,8 +80,13 @@ function formatTime(s) {
   return `${m}:${sec.toString().padStart(2,'0')}`;
 }
 
-function generateSessionHash() {
-  return Math.random().toString(36).substring(2, 12);
+function uuid() {
+  return crypto.randomUUID
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random()*16|0;
+        return (c==='x'?r:(r&0x3|0x8)).toString(16);
+      });
 }
 
 /* ── Phase switcher ── */
@@ -124,12 +129,10 @@ function showFile(file) {
   dzFileSize.textContent  = formatBytes(file.size);
   dzFileType.textContent  = FILE_LABELS[ext] || ext.toUpperCase();
   dropZone.classList.add('has-file');
-  // convertBtn.disabled = false;
+  convertBtn.disabled = false;
   // Animate the file bar fill
   const bar = dzFile.querySelector('.dz-file-bar-fill');
   if (bar) { bar.style.width = '0'; requestAnimationFrame(() => { bar.style.width = '100%'; }); }
-
-  runConversion(file);
 }
 
 function clearFile() {
@@ -139,7 +142,7 @@ function clearFile() {
   dzDragover.hidden = true;
   dzFile.hidden     = true;
   dropZone.classList.remove('has-file','drag-over');
-  // convertBtn.disabled = true;
+  convertBtn.disabled = true;
 }
 
 function resetUI() {
@@ -147,7 +150,7 @@ function resetUI() {
   stopVisualizer();
   clearFile();
   showPhase('upload');
-  // convertBtn.classList.remove('loading');
+  convertBtn.classList.remove('loading');
   setProgress(0, 'Starting…');
   [stepUpload, stepExtract, stepSynth, stepDone].forEach(s => setStep(s,'idle'));
   [conn1, conn2, conn3].forEach(c => setConn(c, false));
@@ -160,7 +163,7 @@ function showError(msg) {
   console.error('[Kokoro Error]', msg);
   showPhase('error');
   errorMsg.textContent = msg;
-  // convertBtn.classList.remove('loading');
+  convertBtn.classList.remove('loading');
 }
 
 /* ── Drag & drop ── */
@@ -194,17 +197,17 @@ resetBtn.addEventListener('click', resetUI);
 errorResetBtn.addEventListener('click', resetUI);
 
 /* ── Convert ── */
-// convertBtn.addEventListener('click', async () => {
-//   if (!selectedFile) return;
-//   await runConversion(selectedFile);
-// });
+convertBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  await runConversion(selectedFile);
+});
 
 /* ══════════════════════════════════════════════
    MAIN CONVERSION FLOW
 ═══════════════════════════════════════════════ */
 async function runConversion(file) {
-  // convertBtn.classList.add('loading');
-  // convertBtn.disabled = true;
+  convertBtn.classList.add('loading');
+  convertBtn.disabled = true;
   showPhase('progress');
 
   setStep(stepUpload, 'active');
@@ -212,19 +215,12 @@ async function runConversion(file) {
 
   try {
     /* ── 0. Wake up check ── */
-    // A quick fetch to ensure the space is alive and returning JSON
-    const checkSpace = async () => {
-      const res = await fetch(`${BASE}/config`);
-      if (!res.ok) throw new Error('Not ok');
-      const ct = res.headers.get('content-type');
-      if (!ct || !ct.includes('application/json')) throw new Error('Not JSON');
-      return true;
-    };
-
-    await checkSpace().catch(() => {
-        return new Promise(r => setTimeout(r, 3000)).then(checkSpace);
+    // A quick fetch to ensure the space is alive
+    await fetch(`${BASE}/config`).catch(() => {
+        // If it fails, wait a bit and retry once
+        return new Promise(r => setTimeout(r, 2000)).then(() => fetch(`${BASE}/config`));
     }).catch(() => {
-        throw new Error('Hugging Face Space is currently waking up. This usually takes 1-2 minutes. Please wait a moment and try again.');
+        throw new Error('Hugging Face Space is currently sleeping or unavailable. Please try again in 30 seconds.');
     });
 
     /* ── 1. UPLOAD with timing ── */
@@ -239,8 +235,7 @@ async function runConversion(file) {
     setProgress(28, `Uploaded in ${uploadSec}s — Extracting text…`);
 
     /* ── 2. QUEUE ── */
-    const sessionHash = generateSessionHash();
-    console.log('[Kokoro] Starting session:', sessionHash);
+    const sessionHash = uuid();
     await queueJob(uploadData, sessionHash);
     setProgress(38, 'Job queued — waiting for model…');
 
@@ -270,74 +265,48 @@ function uploadFile(file) {
 
     xhr.addEventListener('load', () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        if (xhr.status === 404) {
-          return reject(new Error(`Upload failed (404). The AI model is currently waking up. Please wait 1-2 minutes and try again.`));
-        }
-        return reject(new Error(`Upload failed (${xhr.status}).`));
+        return reject(new Error(`Upload failed (${xhr.status}). The space might be waking up.`));
       }
       try {
         const data = JSON.parse(xhr.responseText);
-        if (!Array.isArray(data) || data.length === 0) throw new Error('Bad upload response');
-        // Return the first path/object
+        if (!Array.isArray(data) || !data[0]) throw new Error('Bad upload response');
+        // Return the full file object if available
         resolve(data[0]);
       } catch (e) { reject(e); }
     });
 
     xhr.addEventListener('error', () => reject(new Error('Network error during upload. Check your internet or the HF Space status.')));
-    xhr.open('POST', `${BASE}/upload`);
+    xhr.open('POST', `${BASE}/gradio_api/upload`);
     xhr.send(fd);
   });
 }
 
-
 /* ── Queue job ── */
 async function queueJob(uploadData, sessionHash) {
-  // Ensure we have a valid FileData object
-  let fileData;
-  if (typeof uploadData === 'string') {
-    fileData = { path: uploadData, meta: { _type: 'gradio.FileData' } };
-  } else if (uploadData && typeof uploadData === 'object') {
-    fileData = uploadData;
-    // Ensure meta is present
-    if (!fileData.meta) fileData.meta = { _type: 'gradio.FileData' };
-  } else {
-    throw new Error('Invalid upload data received from server.');
-  }
+  // Construct the correct file data object for Gradio
+  const fileData = typeof uploadData === 'string' 
+    ? { path: uploadData, meta: { _type: 'gradio.FileData' } }
+    : uploadData;
 
-  const payload = {
-    data: [fileData],
-    fn_index: 0,
-    api_name: 'run_pipeline', // Using api_name is more robust in Gradio 4
-    session_hash: sessionHash,
-    trigger_id: null,
-    event_data: null,
-  };
-
-  console.log('[Kokoro] Joining queue with payload:', payload);
-
-  const res = await fetch(`${BASE}/queue/join`, {
+  const res = await fetch(`${BASE}/gradio_api/queue/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      data: [fileData],
+      fn_index: 0,
+      session_hash: sessionHash,
+      trigger_id: null,
+      event_data: null,
+    }),
   });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => 'No error detail');
-    console.error('[Kokoro] Queue join failed:', res.status, errText);
-    throw new Error(`Queue join failed (${res.status}). The server might be waking up or overloaded.`);
-  }
-
-  const json = await res.json();
-  console.log('[Kokoro] Queue join success, event_id:', json.event_id);
-  return json.event_id;
+  if (!res.ok) throw new Error(`Queue join failed (${res.status}). The server might be overloaded.`);
+  return (await res.json()).event_id;
 }
 
 /* ── SSE stream ── */
 function streamResults(sessionHash) {
   return new Promise((resolve, reject) => {
-    const sseUrl = `${BASE}/queue/data?session_hash=${encodeURIComponent(sessionHash)}`;
-    console.log('[Kokoro] Opening SSE connection:', sseUrl);
-    const sse = new EventSource(sseUrl);
+    const sse = new EventSource(`${BASE}/gradio_api/queue/data?session_hash=${encodeURIComponent(sessionHash)}`);
     currentSSE = sse;
     let synthStarted = false;
 
@@ -402,7 +371,7 @@ function streamResults(sessionHash) {
 
 /* ── Completion ── */
 function handleCompletion(audioData, txtData, statusText) {
-  // convertBtn.classList.remove('loading');
+  convertBtn.classList.remove('loading');
   showPhase('results');
 
   /* Status text — include total time */
@@ -416,7 +385,7 @@ function handleCompletion(audioData, txtData, statusText) {
   /* Set audio src */
   let audioUrl = null;
   if (audioData?.url) audioUrl = audioData.url;
-  else if (audioData?.path) audioUrl = `${BASE}/file=${encodeURIComponent(audioData.path)}`;
+  else if (audioData?.path) audioUrl = `${BASE}/gradio_api/file=${encodeURIComponent(audioData.path)}`;
 
   if (audioUrl) {
     audioPlayer.src = audioUrl;
@@ -429,7 +398,7 @@ function handleCompletion(audioData, txtData, statusText) {
     downloadTxt.href = txtData.url;
     downloadTxt.download = txtData?.orig_name || 'processed_text.txt';
   } else if (txtData?.path) {
-    const u = `${BASE}/file=${encodeURIComponent(txtData.path)}`;
+    const u = `${BASE}/gradio_api/file=${encodeURIComponent(txtData.path)}`;
     downloadTxt.href = u;
     downloadTxt.download = txtData?.orig_name || 'processed_text.txt';
   } else {
