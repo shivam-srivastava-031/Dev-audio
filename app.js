@@ -80,13 +80,8 @@ function formatTime(s) {
   return `${m}:${sec.toString().padStart(2,'0')}`;
 }
 
-function uuid() {
-  return crypto.randomUUID
-    ? crypto.randomUUID()
-    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-        const r = Math.random()*16|0;
-        return (c==='x'?r:(r&0x3|0x8)).toString(16);
-      });
+function generateSessionHash() {
+  return Math.random().toString(36).substring(2, 12);
 }
 
 /* ── Phase switcher ── */
@@ -215,12 +210,19 @@ async function runConversion(file) {
 
   try {
     /* ── 0. Wake up check ── */
-    // A quick fetch to ensure the space is alive
-    await fetch(`${BASE}/config`).catch(() => {
-        // If it fails, wait a bit and retry once
-        return new Promise(r => setTimeout(r, 2000)).then(() => fetch(`${BASE}/config`));
+    // A quick fetch to ensure the space is alive and returning JSON
+    const checkSpace = async () => {
+      const res = await fetch(`${BASE}/config`);
+      if (!res.ok) throw new Error('Not ok');
+      const ct = res.headers.get('content-type');
+      if (!ct || !ct.includes('application/json')) throw new Error('Not JSON');
+      return true;
+    };
+
+    await checkSpace().catch(() => {
+        return new Promise(r => setTimeout(r, 3000)).then(checkSpace);
     }).catch(() => {
-        throw new Error('Hugging Face Space is currently sleeping or unavailable. Please try again in 30 seconds.');
+        throw new Error('Hugging Face Space is currently waking up. This usually takes 1-2 minutes. Please wait a moment and try again.');
     });
 
     /* ── 1. UPLOAD with timing ── */
@@ -235,7 +237,8 @@ async function runConversion(file) {
     setProgress(28, `Uploaded in ${uploadSec}s — Extracting text…`);
 
     /* ── 2. QUEUE ── */
-    const sessionHash = uuid();
+    const sessionHash = generateSessionHash();
+    console.log('[Kokoro] Starting session:', sessionHash);
     await queueJob(uploadData, sessionHash);
     setProgress(38, 'Job queued — waiting for model…');
 
@@ -265,48 +268,74 @@ function uploadFile(file) {
 
     xhr.addEventListener('load', () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        return reject(new Error(`Upload failed (${xhr.status}). The space might be waking up.`));
+        if (xhr.status === 404) {
+          return reject(new Error(`Upload failed (404). The AI model is currently waking up. Please wait 1-2 minutes and try again.`));
+        }
+        return reject(new Error(`Upload failed (${xhr.status}).`));
       }
       try {
         const data = JSON.parse(xhr.responseText);
-        if (!Array.isArray(data) || !data[0]) throw new Error('Bad upload response');
-        // Return the full file object if available
+        if (!Array.isArray(data) || data.length === 0) throw new Error('Bad upload response');
+        // Return the first path/object
         resolve(data[0]);
       } catch (e) { reject(e); }
     });
 
     xhr.addEventListener('error', () => reject(new Error('Network error during upload. Check your internet or the HF Space status.')));
-    xhr.open('POST', `${BASE}/gradio_api/upload`);
+    xhr.open('POST', `${BASE}/upload`);
     xhr.send(fd);
   });
 }
 
+
 /* ── Queue job ── */
 async function queueJob(uploadData, sessionHash) {
-  // Construct the correct file data object for Gradio
-  const fileData = typeof uploadData === 'string' 
-    ? { path: uploadData, meta: { _type: 'gradio.FileData' } }
-    : uploadData;
+  // Ensure we have a valid FileData object
+  let fileData;
+  if (typeof uploadData === 'string') {
+    fileData = { path: uploadData, meta: { _type: 'gradio.FileData' } };
+  } else if (uploadData && typeof uploadData === 'object') {
+    fileData = uploadData;
+    // Ensure meta is present
+    if (!fileData.meta) fileData.meta = { _type: 'gradio.FileData' };
+  } else {
+    throw new Error('Invalid upload data received from server.');
+  }
 
-  const res = await fetch(`${BASE}/gradio_api/queue/join`, {
+  const payload = {
+    data: [fileData],
+    fn_index: 0,
+    api_name: 'run_pipeline', // Using api_name is more robust in Gradio 4
+    session_hash: sessionHash,
+    trigger_id: null,
+    event_data: null,
+  };
+
+  console.log('[Kokoro] Joining queue with payload:', payload);
+
+  const res = await fetch(`${BASE}/queue/join`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      data: [fileData],
-      fn_index: 0,
-      session_hash: sessionHash,
-      trigger_id: null,
-      event_data: null,
-    }),
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`Queue join failed (${res.status}). The server might be overloaded.`);
-  return (await res.json()).event_id;
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => 'No error detail');
+    console.error('[Kokoro] Queue join failed:', res.status, errText);
+    throw new Error(`Queue join failed (${res.status}). The server might be waking up or overloaded.`);
+  }
+
+  const json = await res.json();
+  console.log('[Kokoro] Queue join success, event_id:', json.event_id);
+  return json.event_id;
 }
 
 /* ── SSE stream ── */
 function streamResults(sessionHash) {
   return new Promise((resolve, reject) => {
-    const sse = new EventSource(`${BASE}/gradio_api/queue/data?session_hash=${encodeURIComponent(sessionHash)}`);
+    const sseUrl = `${BASE}/queue/data?session_hash=${encodeURIComponent(sessionHash)}`;
+    console.log('[Kokoro] Opening SSE connection:', sseUrl);
+    const sse = new EventSource(sseUrl);
     currentSSE = sse;
     let synthStarted = false;
 
@@ -385,7 +414,7 @@ function handleCompletion(audioData, txtData, statusText) {
   /* Set audio src */
   let audioUrl = null;
   if (audioData?.url) audioUrl = audioData.url;
-  else if (audioData?.path) audioUrl = `${BASE}/gradio_api/file=${encodeURIComponent(audioData.path)}`;
+  else if (audioData?.path) audioUrl = `${BASE}/file=${encodeURIComponent(audioData.path)}`;
 
   if (audioUrl) {
     audioPlayer.src = audioUrl;
@@ -398,7 +427,7 @@ function handleCompletion(audioData, txtData, statusText) {
     downloadTxt.href = txtData.url;
     downloadTxt.download = txtData?.orig_name || 'processed_text.txt';
   } else if (txtData?.path) {
-    const u = `${BASE}/gradio_api/file=${encodeURIComponent(txtData.path)}`;
+    const u = `${BASE}/file=${encodeURIComponent(txtData.path)}`;
     downloadTxt.href = u;
     downloadTxt.download = txtData?.orig_name || 'processed_text.txt';
   } else {
