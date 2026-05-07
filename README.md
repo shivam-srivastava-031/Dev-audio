@@ -33,9 +33,9 @@
 ### API Flow (Gradio SSE v3)
 
 ```
-1. POST /gradio_api/upload         →  Upload file, get server path
-2. POST /gradio_api/queue/join     →  Queue the TTS job
-3. GET  /gradio_api/queue/data     →  Stream SSE events for live progress
+1. POST /upload         →  Upload file, get server path
+2. POST /queue/join     →  Queue the TTS job
+3. GET  /queue/data     →  Stream SSE events for live progress
 4.      process_completed          →  Receive audio + txt FileData objects
 ```
 
